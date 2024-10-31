@@ -36,6 +36,8 @@ import org.eclipse.core.runtime.IConfigurationElement;
 import org.eclipse.core.runtime.IExtension;
 import org.eclipse.core.runtime.IExtensionPoint;
 import org.eclipse.core.runtime.IExtensionRegistry;
+import org.eclipse.core.runtime.Platform;
+import org.eclipse.core.runtime.Platform.OS;
 import org.eclipse.core.runtime.RegistryFactory;
 import org.eclipse.core.runtime.preferences.IEclipsePreferences;
 import org.eclipse.core.runtime.preferences.InstanceScope;
@@ -51,6 +53,7 @@ import org.eclipse.jface.dialogs.Dialog;
 import org.eclipse.jface.dialogs.MessageDialog;
 import org.eclipse.jface.fieldassist.ControlDecoration;
 import org.eclipse.jface.fieldassist.FieldDecorationRegistry;
+import org.eclipse.jface.layout.GridDataFactory;
 import org.eclipse.jface.preference.IPreferenceStore;
 import org.eclipse.jface.preference.PreferencePage;
 import org.eclipse.jface.util.Util;
@@ -71,6 +74,7 @@ import org.eclipse.swt.widgets.Button;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Display;
+import org.eclipse.swt.widgets.Group;
 import org.eclipse.swt.widgets.Label;
 import org.eclipse.ui.IWorkbench;
 import org.eclipse.ui.IWorkbenchPreferenceConstants;
@@ -109,6 +113,7 @@ public class ViewsPreferencePage extends PreferencePage implements IWorkbenchPre
 	private boolean highContrastMode;
 
 	private Button themingEnabled;
+	private Button rescaleAtRuntime;
 
 	private Button hideIconsForViewTabs;
 	private Button showFullTextForViewTabs;
@@ -130,6 +135,7 @@ public class ViewsPreferencePage extends PreferencePage implements IWorkbenchPre
 			layout.horizontalSpacing = 10;
 			comp.setLayout(layout);
 			createThemeIndependentComposits(comp);
+			createHiDPISettingsGroup(comp);
 			return comp;
 		}
 
@@ -175,6 +181,8 @@ public class ViewsPreferencePage extends PreferencePage implements IWorkbenchPre
 		createHideIconsForViewTabs(comp);
 		createDependency(showFullTextForViewTabs, hideIconsForViewTabs);
 
+		createHiDPISettingsGroup(comp);
+
 		if (currentTheme != null) {
 			String colorsAndFontsThemeId = getColorAndFontThemeIdByThemeId(currentTheme.getId());
 			if (colorsAndFontsThemeId != null && !currentColorsAndFontsTheme.getId().equals(colorsAndFontsThemeId)) {
@@ -185,6 +193,30 @@ public class ViewsPreferencePage extends PreferencePage implements IWorkbenchPre
 
 		Dialog.applyDialogFont(comp);
 		return comp;
+	}
+
+	private void createHiDPISettingsGroup(Composite parent) {
+		if (!OS.isWindows()) {
+			return;
+		}
+		createLabel(parent, ""); //$NON-NLS-1$
+		Group group = new Group(parent, SWT.LEFT);
+		group.setText(WorkbenchMessages.HiDpiSettingsGroupTitle);
+
+		GridData gridData = new GridData(SWT.FILL, SWT.CENTER, true, false);
+		gridData.horizontalSpan = ((GridLayout) parent.getLayout()).numColumns;
+		group.setLayoutData(gridData);
+		group.setFont(parent.getFont());
+		GridLayout layout = new GridLayout(1, false);
+		group.setLayout(layout);
+		Label infoLabel = new Label(group, SWT.WRAP);
+		infoLabel.setText(WorkbenchMessages.RescaleAtRuntimeDisclaimer);
+		infoLabel.setLayoutData(GridDataFactory.defaultsFor(infoLabel).create());
+		createLabel(group, ""); //$NON-NLS-1$
+
+		boolean initialStateRescaleAtRuntime = PrefUtil.getAPIPreferenceStore()
+				.getBoolean(IWorkbenchPreferenceConstants.RESCALING_AT_RUNTIME);
+		rescaleAtRuntime = createCheckButton(group, WorkbenchMessages.RescaleAtRuntimeEnabled, initialStateRescaleAtRuntime);
 	}
 
 	private void createThemeIndependentComposits(Composite comp) {
@@ -219,7 +251,6 @@ public class ViewsPreferencePage extends PreferencePage implements IWorkbenchPre
 		GridData gridData = new GridData();
 		gridData.horizontalIndent = 20;
 		dependent.setLayoutData(gridData);
-
 		boolean parentState = parent.getSelection();
 		dependent.setEnabled(parentState);
 
@@ -334,6 +365,14 @@ public class ViewsPreferencePage extends PreferencePage implements IWorkbenchPre
 				.getSelection();
 		prefs.putBoolean(PartRenderingEngine.ENABLED_THEME_KEY, themingEnabled.getSelection());
 
+		boolean isRescaleAtRuntimeChanged = false;
+		if (rescaleAtRuntime != null) {
+			boolean initialStateRescaleAtRuntime = PrefUtil.getAPIPreferenceStore()
+					.getBoolean(IWorkbenchPreferenceConstants.RESCALING_AT_RUNTIME);
+			isRescaleAtRuntimeChanged = initialStateRescaleAtRuntime != rescaleAtRuntime.getSelection();
+			apiStore.setValue(IWorkbenchPreferenceConstants.RESCALING_AT_RUNTIME, rescaleAtRuntime.getSelection());
+		}
+
 		prefs.putBoolean(CTabRendering.USE_ROUND_TABS, useRoundTabs.getSelection());
 		try {
 			prefs.flush();
@@ -360,19 +399,22 @@ public class ViewsPreferencePage extends PreferencePage implements IWorkbenchPre
 			colorFontsDecorator.hide();
 
 			if (themeChanged || colorsAndFontsThemeChanged) {
-				showRestartDialog();
+				showRestartDialog(WorkbenchMessages.ThemeChangeWarningTitle, WorkbenchMessages.ThemeChangeWarningText);
 			}
 		}
 		if (themingEnabledChanged) {
-			showRestartDialog();
+			showRestartDialog(WorkbenchMessages.ThemeChangeWarningTitle, WorkbenchMessages.ThemeChangeWarningText);
+		}
+		if (isRescaleAtRuntimeChanged) {
+			showRestartDialog(WorkbenchMessages.RescaleAtRuntimeSettingChangeWarningTitle,
+					WorkbenchMessages.RescaleAtRuntimeSettingChangeWarningText);
 		}
 
 		return super.performOk();
 	}
 
-	private void showRestartDialog() {
-		if (new MessageDialog(null, WorkbenchMessages.ThemeChangeWarningTitle, null,
-				WorkbenchMessages.ThemeChangeWarningText, MessageDialog.NONE, 2,
+	private void showRestartDialog(String title, String warningText) {
+		if (new MessageDialog(null, title, null, warningText, MessageDialog.NONE, 2,
 				WorkbenchMessages.Workbench_RestartButton, WorkbenchMessages.Workbench_DontRestartButton)
 						.open() == Window.OK) {
 			Display.getDefault().asyncExec(() -> PlatformUI.getWorkbench().restart());
